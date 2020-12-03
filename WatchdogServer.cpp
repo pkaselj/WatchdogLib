@@ -1,8 +1,6 @@
 #include"WatchdogServer.hpp"
 #include"/home/pi/Shared/LoggerLib/0.0.0/NulLogger.hpp"
 
-#include<vector>
-
 void WatchdogServer::defaultInit()
 {
     RTO = 3;
