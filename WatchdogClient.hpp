@@ -4,6 +4,9 @@
 #include"/home/pi/Shared/IPCommunicationsLib/0.0.0/mailbox.hpp"
 #include"/home/pi/Shared/LoggerLib/0.0.0/ILogger.hpp"
 
+
+enum ProcessStatus : int {RUNNING, TERMINATE};
+
 /**
  * @brief Watchdog client side class. Every process should implement one.
  * 
@@ -45,59 +48,33 @@ class WatchdogClient
      */
     int BaseTTL;
 
-    /**
-     * @brief Requests system crash (soft crash) from WatchdogServer
-     * 
-     * @return true if system crash was authorized
-     * @return false if system crash was not authorized or WatchdogServer did not respond
-     */
-    bool RequestSystemCrash();
-
-    /**
-     * @brief Crashes the process (hard crash)
-     * 
-     * Used when WatchdogServer does not respond to `RequestSystemCrash()`
-     */
-    void EmergencyCrash();
-
     /// Logger flag. Used in destructor to deallocate NulLogger if one was created in constructor (if logger was not specified explicitly)
     bool loggerOwnership = false;
 
     /// Used to create a new NulLogger object when logger isn't specified in constructor.
     void CreateNulLogger();
 
+    /**
+     * @brief Requests system crash (soft crash) from WatchdogServer
+     * 
+     * @return true if system crash was authorized
+     * @return false if system crash was not authorized or WatchdogServer did not respond
+     */
+    void SendCrashRequest();
+
+    bool ListenFor(const std::string& source, const std::string& response);
+
     //////////////////////////////////////////////////
     public:
     //////////////////////////////////////////////////
 
-    /**
-     * @brief Construct a new Watchdog Client object without logger and parameters set to default value
-     * 
-     * See class implementation for default paramater values
-     * 
-     * @param mailboxId String identifier (mailbox's name) - GLOBALLY UNIQUE
-     */
-    WatchdogClient(const std::string& mailboxId);
+    int* p_status;
 
-    /**
-     * @brief Construct a new Watchdog Client object with logger and parameters set to default value
-     * 
-     * See class implementation for default paramater values
-     * 
-     * @param mailboxId String identifier (mailbox's name) - GLOBALLY UNIQUE
-     * @param _logger Pointer to a logger
-     */
-    WatchdogClient(const std::string& mailboxId, ILogger* _logger);
+    WatchdogClient(const std::string& mailboxId, int* _p_status);
 
-    /**
-     * @brief Construct a new Watchdog Client object with logger and parameters set to specified value
-     * 
-     * @param mailboxId String identifier (mailbox's name) - GLOBALLY UNIQUE
-     * @param _logger Pointer to a logger
-     * @param _RTO RTO = Request TimeOut
-     * @param _BaseTTL TTL = Time To Live
-     */
-    WatchdogClient(const std::string& mailboxId, ILogger* _logger, int _RTO, int _BaseTTL);
+    WatchdogClient(const std::string& mailboxId, int* _p_status, ILogger* _logger);
+
+    WatchdogClient(const std::string& mailboxId, int* _p_status, ILogger* _logger, int _RTO, int _BaseTTL);
 
     /**
      * @brief Destroy the Watchdog Client object
@@ -105,25 +82,20 @@ class WatchdogClient
      */
     ~WatchdogClient();
 
-    /**
-     * @brief Block and listen for WatchdogServer "PING" messages and respond with "ACK"
-     * 
-     */
-    void ListenAndRespond();
-
-    /**
-     * @brief Block and listen for messages and decode them to mailbox_message format
-     * 
-     * @return mailbox_message Received message decoded to mailbox_message format
-     */
-    mailbox_message Listen();
-
     
     /**
      * @brief Try to request the system crash from WatchdogServer, else exit process
      * 
      */
-    void Crash();
+    void RequestSystemCrash();
+
+    void Synchronize();
+
+    bool TryToSignal(const std::string& signal, const std::string& response);
+
+    void SetStatusTo(ProcessStatus status);
+
+    void StartMonitoring();
 };
 
 #endif

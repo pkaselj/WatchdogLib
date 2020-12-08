@@ -5,6 +5,7 @@
 
 #include"/home/pi/Shared/IPCommunicationsLib/0.0.0/mailbox.hpp"
 #include"/home/pi/Shared/LoggerLib/0.0.0/ILogger.hpp"
+#include"/home/pi/Shared/ProcessLib/0.0.0/IProcess.hpp"
 
 /**
  * @brief Watchdog server side class.
@@ -50,14 +51,26 @@ class WatchdogServer
      */
     int BaseTTL; // Base number of ping tries before crashing
     
-    /// Vector of MailboxReferences of attached WatchdogClients
-    std::vector<MailboxReference> attachedClients;
+    std::vector<IProcess*> processes;
+    std::vector<int> PIDs;
+    std::vector<bool> syncStatus;
 
     /// Logger flag. Used in destructor to deallocate NulLogger if one was created in constructor (if logger was not specified explicitly)
     bool loggerOwnership = false;
 
     /// Used to create a new NulLogger object when logger isn't specified in constructor.
     void CreateNulLogger();
+
+    /**
+     * @brief Pings WatchdogClient via a mailbox and listens for response.
+     * 
+     * @param destination MailboxReference which references the WatchdogClient's mailbox
+     * @return true WatchdogClient responded with acknowledgement
+     * @return false WatchdogClient did not respond
+     */
+    bool TryToContact(MailboxReference& destination);
+
+    void CreateProcess(IProcess* p_process);
 
     ///////////////////////////////////
     public:
@@ -97,21 +110,6 @@ class WatchdogServer
     ~WatchdogServer();
 
     /**
-     * @brief Attach processes by their PIDs
-     * 
-     * This method takes PID int array as a parameter \n
-     * and creates MailboxReference objects with names \n
-     * correspondin to PIDs. \n
-     * \n
-     * WARNING: This only works if WatchdogClient object's \n
-     * MailboxReferences also have the same names (corresponding to their respective PIDs)\n
-     * 
-     * @param pids Pointer to an array of `int`s containing PIDs of processes to be attached to the WatchdogServer 
-     * @param size Number of elements in `pids` array
-     */
-    void AttachByPID(int* pids, int size);
-
-    /**
      * @brief Send "CRASH" directive to all attached processes to terminate themselves.
      * 
      * Watchdog server is registered as a crash initiator.
@@ -135,29 +133,8 @@ class WatchdogServer
      */
     void Ping(MailboxReference& destination);
 
-    /**
-     * @brief Decodes `message` and takes appropriate action.
-     * 
-     * If received message is "ACK" ("PING" acknowledgement from WatchdogClient) then return TRUE \n
-     * else receives message, if that message is a known request message (e.g. "CRASH" - system crash request from WatchdogClient) \n
-     * then takes the appropiate action and returns FALSE. \n 
-     * \n
-     * Used to check if WatchdogClient acknowledged "PING" message, whilst decoding important requests like "CRASH" \n
-     * 
-     * @param message Received message to be decoded
-     * @return true Received message is equal to "ACK"
-     * @return false Received message is NOT equal to "ACK"
-     */
-    bool Decode(const mailbox_message& message);
 
-    /**
-     * @brief Pings WatchdogClient via a mailbox and listens for response.
-     * 
-     * @param destination MailboxReference which references the WatchdogClient's mailbox
-     * @return true WatchdogClient responded with acknowledgement
-     * @return false WatchdogClient did not respond
-     */
-    bool TryToContact(MailboxReference& destination);
+    void Decode(const mailbox_message& message);
 
     /**
      * @brief Wait for `SleepTime` while listening for requests.
@@ -187,6 +164,14 @@ class WatchdogServer
      * 
      */
     void KillAll();
+
+    void AttachProcess(IProcess* p_process);
+
+    void Sweep();
+
+    void StartMonitoring();
+    
+    void StartAndSynchronize();
 };
 
 #endif

@@ -3,36 +3,47 @@
 
 void WatchdogClient::defaultInit()
 {
-    RTO = 3;
-    BaseTTL = 3;
+    mailbox.RTO = RTO;
+    mailbox.BaseTTL = BaseTTL;
 
     CreateNulLogger();
 }
 
-WatchdogClient::WatchdogClient(const std::string& mailboxId, ILogger* _logger)
-    :   logger(_logger),
+WatchdogClient::WatchdogClient(const std::string& mailboxId, int* _p_status, ILogger* _logger)
+    :   p_status(_p_status),
+        logger(_logger),
         mailbox(mailboxId, logger),
         watchdogServer("0")
 {
+    RTO = 3;
+    BaseTTL = 3;
+
     defaultInit();
 }
 
-WatchdogClient::WatchdogClient(const std::string& mailboxId)
-    :   logger(nullptr),
+WatchdogClient::WatchdogClient(const std::string& mailboxId, int* _p_status)
+    :   p_status(_p_status),
+        logger(nullptr),
         mailbox(mailboxId, logger),
         watchdogServer("0")
 {
+    RTO = 3;
+    BaseTTL = 3;
+
     defaultInit();
 }
 
 
-WatchdogClient::WatchdogClient(const std::string& mailboxId, ILogger* _logger, int _RTO, int _BaseTTL)
-    :   logger(_logger),
+WatchdogClient::WatchdogClient(const std::string& mailboxId, int* _p_status, ILogger* _logger, int _RTO, int _BaseTTL)
+    :   p_status(_p_status),
+        logger(_logger),
         mailbox(mailboxId, logger),
         watchdogServer("0"),
         RTO(_RTO),
         BaseTTL(_BaseTTL)
-        {}
+{
+    defaultInit();
+}
 
 void WatchdogClient::CreateNulLogger()
 {
@@ -49,54 +60,58 @@ WatchdogClient::~WatchdogClient()
         delete logger;
 }
 
-mailbox_message WatchdogClient::Listen()
-{
-    std::string rawMessage = mailbox.receive();
-    mailbox_message message = mailbox.decodeRawMessage(rawMessage);
 
-    return message;
+void WatchdogClient::RequestSystemCrash()
+{
+    if(TryToSignal("CRASH", "CACK"))
+        *logger << "Requesting System crash!";
+    exit(-1);
 }
 
-// ================================ TODO Integrate
-void WatchdogClient::ListenAndRespond()
+
+bool WatchdogClient::ListenFor(const std::string& source, const std::string& response)
 {
-    mailbox_message message = Listen();
-
-    *logger << "Received message: \"" + message.content + "\" from \"" + message.sender + "\"";
-
-    if(message.sender == "0")
+    mailbox_message message = mailbox.receive();
+    if(message.sender == source && message.content == response)
     {
-        *logger << "Responding to Watchdog Server with ACK";
-        mailbox.send(watchdogServer, "ACK");
+        *logger << "Response \"" + response + "\" received from: " + source;
+        return true;
     }
 
+    *logger << "No response from: " + source;
+    return false;
 }
 
-void WatchdogClient::Crash()
+void WatchdogClient::Synchronize()
 {
-    *logger << "Requesting System crash!";
-    mailbox.send(watchdogServer, "CRASH");
-
-    if(RequestSystemCrash() == false)
-        EmergencyCrash();
-
-}
-
-bool WatchdogClient::RequestSystemCrash()
-{
-    int TTL = BaseTTL;
-
+    /*if( TryToSignal("SYN", "SYN") == true)
+        *logger << "Process ready and synchronized!";
+    else
+        RequestSystemCrash();*/
+    bool status = false;
     do
     {
-        mailbox_message message = Listen();
-        if(message.sender == "0" && message.content == "CACK")
+        status = ListenFor(watchdogServer.getName(), "SYN");
+    }
+    while( status == false );
+
+    *logger << "SYNchronization signal received!";
+
+}
+
+bool WatchdogClient::TryToSignal(const std::string& signal, const std::string& response)
+{
+    int TTL = BaseTTL;
+    do
+    {
+        mailbox.send(watchdogServer, signal);
+
+        if( ListenFor( watchdogServer.getName(), response) == true)
         {
-            *logger << "System crash authorized by watchdog server";
+            *logger << "Action authorized by watchdog server";
             return true;
         }
-
-        *logger << "No response from watchdog server";
-
+            
         TTL--;
         *logger << "TTL: " + TTL;
 
@@ -106,9 +121,28 @@ bool WatchdogClient::RequestSystemCrash()
     return false;
 }
 
-// ===============================================
-void WatchdogClient::EmergencyCrash()
+void WatchdogClient::SetStatusTo(ProcessStatus status)
 {
-    *logger << "Emergecy crash initiated!";
-    exit(-1);
+    if(p_status == NULL)
+        return;
+    
+    *p_status = status;
 }
+
+void WatchdogClient::StartMonitoring()
+{
+    do
+    {
+        mailbox_message message = mailbox.receive();
+
+        if(message.content == "CRASH" && message.sender == watchdogServer.getName())
+            SetStatusTo(ProcessStatus::TERMINATE);
+        
+        if(message.content == "PING")
+            *logger << message.sender + " PINGed!";
+
+    } while(*p_status != ProcessStatus::TERMINATE); // p_status == nullptr??
+
+
+}
+
