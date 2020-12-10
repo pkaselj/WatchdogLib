@@ -1,148 +1,88 @@
 #include"WatchdogClient.hpp"
 #include"/home/pi/Shared/LoggerLib/0.0.0/NulLogger.hpp"
 
-void WatchdogClient::defaultInit()
-{
-    mailbox.RTO = RTO;
-    mailbox.BaseTTL = BaseTTL;
+#include<sys/mman.h>
+#include<sys/stat.h>
+#include<fcntl.h>
 
-    CreateNulLogger();
+void ProcessStatus::set(Status _status)
+{
+    status = _status;
 }
 
-WatchdogClient::WatchdogClient(const std::string& mailboxId, int* _p_status, ILogger* _logger)
-    :   p_status(_p_status),
-        logger(_logger),
-        mailbox(mailboxId, logger),
-        watchdogServer("0")
+bool ProcessStatus::operator==(Status _status) const
 {
-    RTO = 3;
-    BaseTTL = 3;
-
-    defaultInit();
+    return (status == _status) ? true : false;
+}
+ProcessStatus& ProcessStatus::operator=(Status _status)
+{
+    status = _status;
+    return *this;
 }
 
-WatchdogClient::WatchdogClient(const std::string& mailboxId, int* _p_status)
-    :   p_status(_p_status),
-        logger(nullptr),
-        mailbox(mailboxId, logger),
-        watchdogServer("0")
+ProcessStatus::operator int() const
 {
-    RTO = 3;
-    BaseTTL = 3;
-
-    defaultInit();
-}
-
-
-WatchdogClient::WatchdogClient(const std::string& mailboxId, int* _p_status, ILogger* _logger, int _RTO, int _BaseTTL)
-    :   p_status(_p_status),
-        logger(_logger),
-        mailbox(mailboxId, logger),
-        watchdogServer("0"),
-        RTO(_RTO),
-        BaseTTL(_BaseTTL)
-{
-    defaultInit();
+    return status;
 }
 
 void WatchdogClient::CreateNulLogger()
 {
-    if(logger == nullptr)
+    if(p_logger == nullptr)
     {
-        logger = new NulLogger();
+        p_logger = new NulLogger();
         loggerOwnership = true;
     }
+        
 }
+
+WatchdogClient::WatchdogClient(const std::string& shmName, int _offset, ILogger* _p_logger)
+    :   watchdogRegister(shmName, 0, _p_logger)
+{
+    p_logger = _p_logger;
+    offset = _offset;
+    CreateNulLogger();
+}
+
 
 WatchdogClient::~WatchdogClient()
 {
     if(loggerOwnership == true)
-        delete logger;
+        delete p_logger;
 }
 
-
-void WatchdogClient::RequestSystemCrash()
+void WatchdogClient::Pet()
 {
-    if(TryToSignal("CRASH", "CACK"))
-        *logger << "Requesting System crash!";
-    exit(-1);
+    ProcessStatus status;
+    status.set(Status::IDLE);
+    watchdogRegister.write(offset, status);
+    *p_logger << "Status set to IDLE";
 }
 
-
-bool WatchdogClient::ListenFor(const std::string& source, const std::string& response)
+void WatchdogClient::Busy()
 {
-    mailbox_message message = mailbox.receive();
-    if(message.sender == source && message.content == response)
+    ProcessStatus status;
+    status.set(Status::BUSY);
+    watchdogRegister.write(offset, status);
+    *p_logger << "Status set to BUSY";
+}
+
+void WatchdogClient::Terminate()
+{
+    ProcessStatus status;
+    status.set(Status::TERMINATE);
+    watchdogRegister.write(offset, status);
+    *p_logger << "Status set to TERMINATE";
+}
+
+bool WatchdogClient::MarkedForTermination()
+{
+    ProcessStatus status = watchdogRegister.read(offset);
+    if(status == Status::TERMINATE)
     {
-        *logger << "Response \"" + response + "\" received from: " + source;
+        *p_logger << "Marked for termination!";
         return true;
     }
-
-    *logger << "No response from: " + source;
+    
+    *p_logger << "NOT marked for termination!";
     return false;
 }
-
-void WatchdogClient::Synchronize()
-{
-    /*if( TryToSignal("SYN", "SYN") == true)
-        *logger << "Process ready and synchronized!";
-    else
-        RequestSystemCrash();*/
-    bool status = false;
-    do
-    {
-        status = ListenFor(watchdogServer.getName(), "SYN");
-    }
-    while( status == false );
-
-    *logger << "SYNchronization signal received!";
-
-}
-
-bool WatchdogClient::TryToSignal(const std::string& signal, const std::string& response)
-{
-    int TTL = BaseTTL;
-    do
-    {
-        mailbox.send(watchdogServer, signal);
-
-        if( ListenFor( watchdogServer.getName(), response) == true)
-        {
-            *logger << "Action authorized by watchdog server";
-            return true;
-        }
-            
-        TTL--;
-        *logger << "TTL: " + TTL;
-
-    } while (TTL > 0);
-    
-    *logger << "TTL reached 0!";
-    return false;
-}
-
-void WatchdogClient::SetStatusTo(ProcessStatus status)
-{
-    if(p_status == NULL)
-        return;
-    
-    *p_status = status;
-}
-
-void WatchdogClient::StartMonitoring()
-{
-    do
-    {
-        mailbox_message message = mailbox.receive();
-
-        if(message.content == "CRASH" && message.sender == watchdogServer.getName())
-            SetStatusTo(ProcessStatus::TERMINATE);
-        
-        if(message.content == "PING")
-            *logger << message.sender + " PINGed!";
-
-    } while(*p_status != ProcessStatus::TERMINATE); // p_status == nullptr??
-
-
-}
-

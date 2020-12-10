@@ -1,11 +1,64 @@
 #ifndef WATCHDOG_CLIENT_HPP
 #define WATCHDOG_CLIENT_HPP
 
-#include"/home/pi/Shared/IPCommunicationsLib/0.0.0/mailbox.hpp"
 #include"/home/pi/Shared/LoggerLib/0.0.0/ILogger.hpp"
 
+#include"/home/pi/Shared/SharedMemoryLib/0.0.0/SharedMemory.hpp"
 
-enum ProcessStatus : int {RUNNING, TERMINATE};
+#include<string>
+
+/**
+ * @brief Enum of possible states of processes/threads declared as `char`s
+ * 
+ */
+enum Status : char {CLEAR = 0, BUSY = 1, IDLE = 2, TERMINATE = 3};
+
+
+/**
+ * @brief Wrapper struct for process status
+ * 
+ */
+typedef struct ProcessStatus ProcessStatus;
+struct ProcessStatus
+{
+    private:
+    /// Status of the current process/thread
+    Status status;
+
+    public:
+    /**
+     * @brief Set the status of the ProcessStatus object
+     * 
+     * @param _status New status
+     */
+    void set(Status _status);
+
+    /**
+     * @brief Compare the ProcessStatus object to the Status enum
+     * 
+     * @param _status Status enum
+     * @return true ProcessStatus is equal to the Status enum
+     * @return false ProcessStatus is NOT equal to the Status enum
+     */
+    bool operator==(Status _status) const;
+
+    /**
+     * @brief Update the ProcessStatus to new status
+     * 
+     * @param _status Status enum
+     * @return const ProcessStatus& Returns the reference to this ProcessStatus object. Used for stacking.
+     */
+    ProcessStatus& operator=(Status _status);
+
+    /**
+     * @brief Conversion to `int` type
+     * 
+     * Mostly used for printing `int` value of ProcessStatus
+     * 
+     * @return int `int` value of current ProcessStatus
+     */
+    operator int() const;
+};
 
 /**
  * @brief Watchdog client side class. Every process should implement one.
@@ -13,68 +66,31 @@ enum ProcessStatus : int {RUNNING, TERMINATE};
  */
 class WatchdogClient
 {
-    //////////////////////////////////////////////////
     private:
-    //////////////////////////////////////////////////
+    /// Shared memory object with ProcessStatus objects as basic shared memory units.
+    SharedMemory<ProcessStatus> watchdogRegister;
 
-    void defaultInit();
+    /// Offset from shared memory base address pointing to the designated WatchdogClient status slot
+    int offset = -1;
 
     /// Pointer to a logger
-    ILogger* logger;
+    ILogger* p_logger = nullptr;
 
-    /// Mailbox used to send and receive messages from WatchdogServer
-    Mailbox mailbox;
-
-    /// MailboxReference to WatchdogServer mailbox
-    MailboxReference watchdogServer;
-
-    /**
-     * @brief RTO = Request TimeOut
-     * 
-     * Used as a timer to `timedReceive()` from Mailbox class. \n
-     * When time runs out (without answer from destination mailbox that sent message was received) \n
-     * WatchdogClient then requests system crash (major error). \n
-     * 
-     */
-    int RTO;
-
-    /**
-     * @brief TTL = Time To Live
-     * 
-     * BaseTTL specifies how many times the WatchdogClient \n
-     * will resend messages to destination via a mailbox \n
-     * without acknowledgement, before requesting system crash (major error). \n
-     * 
-     */
-    int BaseTTL;
-
-    /// Logger flag. Used in destructor to deallocate NulLogger if one was created in constructor (if logger was not specified explicitly)
-    bool loggerOwnership = false;
-
-    /// Used to create a new NulLogger object when logger isn't specified in constructor.
+    /// Creates NulLogger object. Is called when no logger is specified.
     void CreateNulLogger();
 
-    /**
-     * @brief Requests system crash (soft crash) from WatchdogServer
-     * 
-     * @return true if system crash was authorized
-     * @return false if system crash was not authorized or WatchdogServer did not respond
-     */
-    void SendCrashRequest();
+    /// Flag used to signal to destructor to deallocate NulLogger (if it was created in constructor)
+    bool loggerOwnership = false;
 
-    bool ListenFor(const std::string& source, const std::string& response);
-
-    //////////////////////////////////////////////////
     public:
-    //////////////////////////////////////////////////
-
-    int* p_status;
-
-    WatchdogClient(const std::string& mailboxId, int* _p_status);
-
-    WatchdogClient(const std::string& mailboxId, int* _p_status, ILogger* _logger);
-
-    WatchdogClient(const std::string& mailboxId, int* _p_status, ILogger* _logger, int _RTO, int _BaseTTL);
+    /**
+     * @brief Construct a new Watchdog Client object
+     * 
+     * @param shmName String identifier (name) of shared memory
+     * @param _offset Offset from shared memory base address pointing to the designated WatchdogClient status slot
+     * @param _p_logger Pointer to a parent ILogger which is used as a logger. - NULL SAFE
+     */
+    WatchdogClient(const std::string& shmName, int _offset, ILogger* _p_logger = nullptr);
 
     /**
      * @brief Destroy the Watchdog Client object
@@ -82,20 +98,17 @@ class WatchdogClient
      */
     ~WatchdogClient();
 
-    
-    /**
-     * @brief Try to request the system crash from WatchdogServer, else exit process
-     * 
-     */
-    void RequestSystemCrash();
+    /// Sets the status to IDLE
+    void Pet();
 
-    void Synchronize();
+    /// Sets the status to BUSY
+    void Busy();
 
-    bool TryToSignal(const std::string& signal, const std::string& response);
+    /// Signals to the main process that the attached process is or is in process of being TERMINATED
+    void Terminate();
 
-    void SetStatusTo(ProcessStatus status);
-
-    void StartMonitoring();
+    /// Checks if the main process signaled the TERMINATE signal
+    bool MarkedForTermination();
 };
 
 #endif
