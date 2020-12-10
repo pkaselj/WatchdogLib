@@ -50,20 +50,32 @@ WatchdogClient::~WatchdogClient()
         delete p_logger;
 }
 
-void WatchdogClient::Pet()
+bool WatchdogClient::Pet()
 {
+    if(MarkedForTermination() == true) // signal to end process
+        return false;
+
     ProcessStatus status;
     status.set(Status::IDLE);
+
     watchdogRegister.write(offset, status);
     *p_logger << "Status set to IDLE";
+
+    return true;
 }
 
-void WatchdogClient::Busy()
+bool WatchdogClient::Busy()
 {
+    if(MarkedForTermination() == true) // signal to end process
+        return false;
+
     ProcessStatus status;
     status.set(Status::BUSY);
+
     watchdogRegister.write(offset, status);
     *p_logger << "Status set to BUSY";
+
+    return true;
 }
 
 void WatchdogClient::Terminate()

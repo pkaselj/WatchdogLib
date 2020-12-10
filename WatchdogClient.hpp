@@ -82,6 +82,9 @@ class WatchdogClient
     /// Flag used to signal to destructor to deallocate NulLogger (if it was created in constructor)
     bool loggerOwnership = false;
 
+    /// Checks if the main process signaled the TERMINATE signal
+    bool MarkedForTermination();
+
     public:
     /**
      * @brief Construct a new Watchdog Client object
@@ -98,17 +101,26 @@ class WatchdogClient
      */
     ~WatchdogClient();
 
-    /// Sets the status to IDLE
-    void Pet();
+    /**
+     * @brief Sets the status to IDLE. RETURNS FALSE IF PROCESS IS MARKED FOR TERMINATION!
+     * 
+     * @return true Success
+     * @return false Process is marked for TERMINATION
+     */
+    bool Pet();
 
-    /// Sets the status to BUSY
-    void Busy();
+    /**
+     * @brief Sets the status to BUSY. RETURNS FALSE IF PROCESS IS MARKED FOR TERMINATION!
+     * 
+     * @return true Success
+     * @return false Process is marked for TERMINATION
+     */
+    bool Busy();
 
     /// Signals to the main process that the attached process is or is in process of being TERMINATED
     void Terminate();
 
-    /// Checks if the main process signaled the TERMINATE signal
-    bool MarkedForTermination();
+
 };
 
 #endif
