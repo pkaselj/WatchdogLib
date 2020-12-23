@@ -5,74 +5,98 @@
 #include<sys/stat.h>
 #include<fcntl.h>
 
-void ProcessStatus::set(Status _status)
+bool WatchdogClient::SetStatus(ProcessStatus status)
 {
-    status = _status;
+    if(MarkedForTermination() == true) // signal to end process
+        return false;
+
+    watchdogRegister.write(offset, status);
+    return true;
 }
 
-bool ProcessStatus::operator==(Status _status) const
+void WatchdogClient::Reserve()
 {
-    return (status == _status) ? true : false;
-}
-ProcessStatus& ProcessStatus::operator=(Status _status)
-{
-    status = _status;
-    return *this;
-}
+    Mailbox temporaryMailbox(name, p_logger);
 
-ProcessStatus::operator int() const
-{
-    return status;
-}
 
-void WatchdogClient::CreateNulLogger()
-{
-    if(p_logger == nullptr)
+    mailbox_message receivedMessage;
+    while(receivedMessage.isEmpty())
     {
-        p_logger = new NulLogger();
-        loggerOwnership = true;
+        temporaryMailbox.send(watchdogServer, "RESERVE");
+        receivedMessage = temporaryMailbox.timedReceive();
     }
-        
+
+
+    if(receivedMessage.isEmpty())
+    {
+        *p_logger << "No response from Watchdog Server";
+        exit(-1);
+    }
+
+    if(receivedMessage.sender != watchdogServer.getName())
+    {
+        *p_logger << "No response from Watchdog Server";
+        exit(-1);
+    }
+
+    offset = std::stoi(receivedMessage.content);
+
+    if(watchdogRegister.read(offset) != Status::CLAIMED)
+    {
+        *p_logger << "Desginated watchdog status slot is not CLAIMED!";
+        exit(-1);
+    }
+
+    SetStatus(Status::IDLE);
 }
 
-WatchdogClient::WatchdogClient(const std::string& shmName, int _offset, ILogger* _p_logger)
-    :   watchdogRegister(shmName, 0, _p_logger)
+void WatchdogClient::Release()
+{
+    SetStatus(Status::FREE);
+    *p_logger << "Free'd the Watchdog status slot at offset: " + std::to_string(offset);
+}
+
+WatchdogClient::WatchdogClient(const std::string& _name,
+                               const std::string& shmName,
+                               const std::string& watchdogServerMailboxIdentifier,
+                               ILogger* _p_logger)
+
+    :   watchdogRegister(shmName, 0, _p_logger),
+        watchdogServer(watchdogServerMailboxIdentifier),
+        name(_name)
 {
     p_logger = _p_logger;
-    offset = _offset;
-    CreateNulLogger();
+    if(p_logger == nullptr)
+        p_logger = NulLogger::getInstance();
+
+    if(name == "")
+    {
+        *p_logger << "Name cannot be empty!";
+        exit(-1);
+    }
+    
+    Reserve();
 }
 
 
 WatchdogClient::~WatchdogClient()
 {
-    if(loggerOwnership == true)
-        delete p_logger;
+    Release();
 }
 
 bool WatchdogClient::Pet()
 {
-    if(MarkedForTermination() == true) // signal to end process
+    if(SetStatus(Status::IDLE) == false)
         return false;
-
-    ProcessStatus status;
-    status.set(Status::IDLE);
-
-    watchdogRegister.write(offset, status);
+    
     *p_logger << "Status set to IDLE";
-
     return true;
 }
 
 bool WatchdogClient::Busy()
 {
-    if(MarkedForTermination() == true) // signal to end process
+    if(SetStatus(Status::BUSY) == false)
         return false;
-
-    ProcessStatus status;
-    status.set(Status::BUSY);
-
-    watchdogRegister.write(offset, status);
     *p_logger << "Status set to BUSY";
 
     return true;
@@ -80,9 +104,7 @@ bool WatchdogClient::Busy()
 
 void WatchdogClient::Terminate()
 {
-    ProcessStatus status;
-    status.set(Status::TERMINATE);
-    watchdogRegister.write(offset, status);
+    SetStatus(Status::TERMINATE);
     *p_logger << "Status set to TERMINATE";
 }
 
